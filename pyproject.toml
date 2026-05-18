@@ -36,6 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 notebook = ["jupyter", "ipywidgets"]
+interactive = ["plotly>=5.18"]
 
 [project.scripts]
 manager-dna = "manager_dna.pipeline:main"

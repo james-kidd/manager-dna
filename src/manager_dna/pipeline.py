@@ -22,6 +22,7 @@ import yaml
 from .factor_extraction import ManagerialFactorExtractor, FF_FACTORS
 from .regime_model import MarketRegimeModel
 from .dna_mapper import ManagerialDNAMapper
+from .hull_adjustment import FundOptionsExposure, OptionPosition, apply_hull_adjustment
 
 
 def load_config(config_path="config.yaml"):
@@ -77,6 +78,17 @@ def run_pipeline(cfg):
         try:
             extractor.fetch_data()
             loadings = extractor.extract_rolling_factors()
+
+            # Hull delta-equivalent adjustment, if configured for this ticker
+            hull_cfg = cfg.get("hull_adjustment", {}) or {}
+            if ticker in hull_cfg:
+                spec = hull_cfg[ticker]
+                exposure = FundOptionsExposure(
+                    ticker=ticker, nav=float(spec["nav"]),
+                    positions=[OptionPosition(**p) for p in spec.get("positions", [])],
+                )
+                loadings = apply_hull_adjustment(loadings, exposure)
+                print(f"  Hull adjustment applied: multiplier = {loadings.attrs.get('hull_multiplier'):.4f}")
             all_loadings[ticker] = loadings
 
             csv_path = os.path.join(out_dir, f"{ticker}_factor_loadings.csv")
@@ -191,10 +203,27 @@ def run_pipeline(cfg):
         nx.write_graphml(layer, path)
     print(f"Regime layers exported: {len(regime_layers)} .graphml files in {out_dir}/")
 
+    # ── Style drift classification (combines drift + communities + spectral) ──
+    if drift_rows:
+        drift_class = mapper.detect_style_drift(
+            comm_df, drift_df, spec_df,
+            drift_quantile=dcfg.get("drift_quantile", 0.66),
+        )
+        print("\nStyle drift classification per fund:")
+        print(drift_class.round(4))
+        drift_class.to_csv(os.path.join(out_dir, "style_drift_classification.csv"))
+
     network = mapper.build_bipartite_network(edge_threshold=dcfg["edge_threshold"])
 
     net_plot = os.path.join(out_dir, cfg["output"].get("network_plot", "managerial_dna_network.png"))
     mapper.visualize_network(network, save_path=net_plot)
+
+    if dcfg.get("interactive_html", False):
+        try:
+            html_path = os.path.join(out_dir, "managerial_dna_network.html")
+            mapper.visualize_network_interactive(network, save_path=html_path)
+        except ImportError as e:
+            print(f"Skipping interactive HTML (plotly not installed): {e}")
 
     print("\n" + "=" * 60)
     print("PIPELINE COMPLETE")
