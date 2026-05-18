@@ -1,0 +1,40 @@
+# ──────────────────────────────────────────────
+# Manager DNA Pipeline Configuration
+# ──────────────────────────────────────────────
+# All parameters are tunable from here — no code changes needed.
+# Override any value via CLI:  python run_pipeline.py --fund_ticker QQQ
+
+# ── Stage 1: Fama-French Active Factor Extraction ──
+factor_extraction:
+  fund_ticker: "ARKK"
+  benchmark_ticker: "SPY"
+  start_date: "2018-01-01"
+  rolling_window: 63          # trading days (~1 quarter)
+
+# ── Stage 2: GMM Regime Modeling ──
+regime_model:
+  n_regimes: 3                # Bull/Low-Vol, Bear/High-Vol, Transition
+  start_date: "2018-01-01"
+  # end_date defaults to today if omitted
+
+# ── Stage 3: PCA + Network Clustering ──
+dna_mapper:
+  n_components: 2             # number of Super-Style PCs to extract
+  edge_threshold: 0.5         # minimum |loading| to draw an edge
+
+# ── Multi-fund comparison (optional) ──
+# List additional tickers to run Stage 1 on each, then compare in Stage 3
+fund_universe:
+  - "ARKK"
+  - "QQQ"
+  - "SCHD"
+  - "VTV"
+  - "MTUM"
+
+# ── Output ──
+output:
+  dir: "output"
+  regime_plot: "market_regimes_gmm.png"
+  network_plot: "managerial_dna_network.png"
+  factor_csv: "rolling_factor_loadings.csv"
+  regime_csv: "regime_labels.csv"
