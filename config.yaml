@@ -21,6 +21,7 @@ regime_model:
 dna_mapper:
   n_components: 2             # number of Super-Style PCs to extract
   edge_threshold: 0.5         # minimum |loading| to draw an edge
+  bootstrap_iter: 1000        # 0 to skip bootstrap diagnostic
 
 # ── Multi-fund comparison (optional) ──
 # List additional tickers to run Stage 1 on each, then compare in Stage 3

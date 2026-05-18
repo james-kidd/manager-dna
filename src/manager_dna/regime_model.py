@@ -66,7 +66,10 @@ class MarketRegimeModel:
         return self.data
 
     def get_regime_summary(self):
-        return self.data.groupby("Regime")[MACRO_FEATURES].mean()
+        means = self.data.groupby("Regime")[MACRO_FEATURES].mean()
+        counts = self.data["Regime"].value_counts().sort_index().rename("N_Days")
+        share = (counts / counts.sum()).rename("Share")
+        return means.join(counts).join(share)
 
     def plot_regimes(self, save_path="output/market_regimes_gmm.png"):
         fig, ax = plt.subplots(figsize=(14, 7))

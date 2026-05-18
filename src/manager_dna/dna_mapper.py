@@ -50,6 +50,56 @@ class ManagerialDNAMapper:
         print(f"Variance explained: {self.pca.explained_variance_ratio_}")
         return self.fund_loadings, self.super_styles
 
+    def sensitivity_drop_one(self, aggregated_factor_data):
+        """Refit PCA dropping all rows for each fund; report PC1 cosine vs full fit."""
+        full = PCA(n_components=self.n_components)
+        full.fit(StandardScaler().fit_transform(aggregated_factor_data))
+        pc1_full = full.components_[0]
+
+        funds = sorted({idx.rsplit("_R", 1)[0] for idx in aggregated_factor_data.index})
+        rows = []
+        for fund in funds:
+            mask = ~aggregated_factor_data.index.str.startswith(f"{fund}_R")
+            subset = aggregated_factor_data[mask]
+            if len(subset) < self.n_components + 1:
+                continue
+            p = PCA(n_components=self.n_components)
+            p.fit(StandardScaler().fit_transform(subset))
+            pc1_sub = p.components_[0]
+            cos = float(np.dot(pc1_full, pc1_sub) /
+                        (np.linalg.norm(pc1_full) * np.linalg.norm(pc1_sub)))
+            rows.append({
+                "dropped_fund": fund,
+                "pc1_cosine_vs_full": abs(cos),
+                "pc1_var_explained": float(p.explained_variance_ratio_[0]),
+                "pc2_var_explained": float(p.explained_variance_ratio_[1]) if self.n_components > 1 else np.nan,
+            })
+        return pd.DataFrame(rows).set_index("dropped_fund")
+
+    def bootstrap_pca(self, aggregated_factor_data, n_iter=1000, random_state=42):
+        """Bootstrap rows with replacement; return distribution of variance explained per PC."""
+        rng = np.random.default_rng(random_state)
+        n = len(aggregated_factor_data)
+        records = np.zeros((n_iter, self.n_components))
+        for i in range(n_iter):
+            idx = rng.integers(0, n, size=n)
+            sample = aggregated_factor_data.iloc[idx]
+            try:
+                p = PCA(n_components=self.n_components)
+                p.fit(StandardScaler().fit_transform(sample))
+                records[i] = p.explained_variance_ratio_
+            except Exception:
+                records[i] = np.nan
+        df = pd.DataFrame(records, columns=[f"PC{i+1}" for i in range(self.n_components)])
+        summary = pd.DataFrame({
+            "mean": df.mean(),
+            "std": df.std(),
+            "p05": df.quantile(0.05),
+            "p50": df.quantile(0.50),
+            "p95": df.quantile(0.95),
+        })
+        return summary
+
     def build_bipartite_network(self, edge_threshold=0.5):
         print("Constructing bipartite DNA network...")
         B = nx.Graph()

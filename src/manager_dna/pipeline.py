@@ -94,16 +94,30 @@ def run_pipeline(cfg):
     print("=" * 60)
 
     regime_labels = regime_data["Regime"]
+    regime_start, regime_end = regime_labels.index.min(), regime_labels.index.max()
+    print(f"Regime label coverage: {regime_start.date()} → {regime_end.date()} ({len(regime_labels)} days)")
+
     aggregated_rows = []
+    drift_rows = []
 
     for ticker, loadings in all_loadings.items():
         common_dates = loadings.index.intersection(regime_labels.index)
         if len(common_dates) == 0:
             print(f"WARNING: No overlapping dates for {ticker}, skipping.")
             continue
+        discarded = len(loadings) - len(common_dates)
+        if discarded > 0:
+            pct = 100 * discarded / len(loadings)
+            print(f"  {ticker}: kept {len(common_dates)}/{len(loadings)} obs ({pct:.0f}% discarded by macro-window mismatch)")
 
         merged = loadings.loc[common_dates].copy()
         merged["Regime"] = regime_labels.loc[common_dates]
+
+        # Within-fund drift: std of betas across regime means
+        regime_means = merged.groupby("Regime")[FF_FACTORS].mean()
+        drift = regime_means.std(axis=0)
+        drift.name = ticker
+        drift_rows.append(drift)
 
         for r in range(rcfg["n_regimes"]):
             regime_slice = merged[merged["Regime"] == r]
@@ -111,6 +125,15 @@ def run_pipeline(cfg):
                 avg_betas = regime_slice[FF_FACTORS].mean()
                 avg_betas.name = f"{ticker}_R{r}"
                 aggregated_rows.append(avg_betas)
+
+    if drift_rows:
+        drift_df = pd.DataFrame(drift_rows)
+        drift_df["Total_Drift"] = drift_df.sum(axis=1)
+        print("\nWithin-fund style drift (std of per-regime mean betas):")
+        print(drift_df.sort_values("Total_Drift", ascending=False).round(4))
+        drift_csv = os.path.join(out_dir, "within_fund_drift.csv")
+        drift_df.to_csv(drift_csv)
+        print(f"Drift table saved: {drift_csv}")
 
     if not aggregated_rows:
         print("ERROR: No aggregated data produced. Exiting.")
@@ -134,6 +157,19 @@ def run_pipeline(cfg):
     print(super_styles)
     print("\nFund-regime DNA loadings:")
     print(fund_loadings_pca)
+
+    # ── Diagnostics: drop-one sensitivity + bootstrap uncertainty ──
+    print("\nDrop-one fund sensitivity (PC1 cosine vs full fit; 1.0 = identical):")
+    sens = mapper.sensitivity_drop_one(df_agg)
+    print(sens.round(4))
+    sens.to_csv(os.path.join(out_dir, "pca_sensitivity_drop_one.csv"))
+
+    n_boot = dcfg.get("bootstrap_iter", 1000)
+    if n_boot > 0:
+        print(f"\nBootstrapping PCA variance explained ({n_boot} iters)...")
+        boot = mapper.bootstrap_pca(df_agg, n_iter=n_boot)
+        print(boot.round(4))
+        boot.to_csv(os.path.join(out_dir, "pca_bootstrap_variance.csv"))
 
     network = mapper.build_bipartite_network(edge_threshold=dcfg["edge_threshold"])
 
