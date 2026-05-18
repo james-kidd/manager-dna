@@ -76,6 +76,99 @@ class ManagerialDNAMapper:
             })
         return pd.DataFrame(rows).set_index("dropped_fund")
 
+    def fund_projection_communities(self, similarity_threshold=0.0, seed=42):
+        """One-mode projection of bipartite graph onto fund-regime nodes via cosine
+        similarity of PCA loadings, then Louvain community detection.
+
+        Closet-indexing test: a fund whose entire (Fund_R0, Fund_R1, Fund_R2) trio
+        lands in the same community as a benchmark proxy is statistically
+        indistinguishable from passive exposure.
+        """
+        if self.fund_loadings is None:
+            raise RuntimeError("Call extract_super_styles first.")
+
+        L = self.fund_loadings.values
+        norms = np.linalg.norm(L, axis=1, keepdims=True)
+        L_unit = L / np.where(norms == 0, 1, norms)
+        S = L_unit @ L_unit.T
+        np.fill_diagonal(S, 0.0)
+
+        nodes = self.fund_loadings.index.tolist()
+        G = nx.Graph()
+        G.add_nodes_from(nodes)
+        for i in range(len(nodes)):
+            for j in range(i + 1, len(nodes)):
+                w = float(S[i, j])
+                if w > similarity_threshold:
+                    G.add_edge(nodes[i], nodes[j], weight=w)
+
+        try:
+            from networkx.algorithms.community import louvain_communities
+            communities = louvain_communities(G, weight="weight", seed=seed)
+        except ImportError:
+            from networkx.algorithms.community import greedy_modularity_communities
+            communities = list(greedy_modularity_communities(G, weight="weight"))
+
+        rows = []
+        for cid, comm in enumerate(sorted(communities, key=lambda c: -len(c))):
+            for node in comm:
+                fund, _, regime = node.rpartition("_R")
+                rows.append({"node": node, "fund": fund, "regime": int(regime), "community": cid})
+        df = pd.DataFrame(rows).set_index("node").sort_values(["community", "fund", "regime"])
+
+        # Fund-level consistency: how many distinct communities does each fund's
+        # 3 regime nodes span? 1 = consistent style, >1 = regime-dependent style.
+        consistency = df.groupby("fund")["community"].nunique().rename("communities_spanned")
+        return df, G, consistency
+
+    def regime_spectral_distance(self, aggregated_factor_data, factor_cols):
+        """Build a fund-fund similarity graph per regime layer and compute pairwise
+        Laplacian spectral distance between layers.
+
+        Mathematically: L_r = D_r - A_r where A_r is the |cosine| similarity of
+        fund factor vectors within regime r. Spectral distance between layers
+        r and r' = ||sort(eig(L_r)) - sort(eig(L_r'))||_2.
+
+        Small spectral distance => the universe's *relative* style structure is
+        preserved across regimes (no aggregate drift). Large => the network
+        topology itself reorganizes between regimes.
+        """
+        regimes = sorted({int(idx.rsplit("_R", 1)[1]) for idx in aggregated_factor_data.index})
+        layers = {}
+        spectra = {}
+
+        for r in regimes:
+            mask = [idx for idx in aggregated_factor_data.index if idx.endswith(f"_R{r}")]
+            sub = aggregated_factor_data.loc[mask].copy()
+            sub.index = [idx.rsplit("_R", 1)[0] for idx in sub.index]
+
+            X = sub[factor_cols].values
+            norms = np.linalg.norm(X, axis=1, keepdims=True)
+            Xu = X / np.where(norms == 0, 1, norms)
+            S = np.abs(Xu @ Xu.T)
+            np.fill_diagonal(S, 0.0)
+
+            D = np.diag(S.sum(axis=1))
+            Lap = D - S
+            eigs = np.sort(np.linalg.eigvalsh(Lap))
+
+            G = nx.Graph()
+            for i, u in enumerate(sub.index):
+                G.add_node(u)
+                for j in range(i + 1, len(sub.index)):
+                    if S[i, j] > 0:
+                        G.add_edge(u, sub.index[j], weight=float(S[i, j]))
+            layers[r] = G
+            spectra[r] = eigs
+
+        rows = []
+        rs = sorted(spectra)
+        for i, r1 in enumerate(rs):
+            for r2 in rs[i + 1:]:
+                d = float(np.linalg.norm(spectra[r1] - spectra[r2]))
+                rows.append({"regime_a": r1, "regime_b": r2, "spectral_distance": d})
+        return pd.DataFrame(rows), layers, spectra
+
     def bootstrap_pca(self, aggregated_factor_data, n_iter=1000, random_state=42):
         """Bootstrap rows with replacement; return distribution of variance explained per PC."""
         rng = np.random.default_rng(random_state)
