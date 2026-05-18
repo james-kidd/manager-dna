@@ -16,6 +16,7 @@ import os
 import sys
 
 import pandas as pd
+import networkx as nx
 import yaml
 
 from .factor_extraction import ManagerialFactorExtractor, FF_FACTORS
@@ -170,6 +171,25 @@ def run_pipeline(cfg):
         boot = mapper.bootstrap_pca(df_agg, n_iter=n_boot)
         print(boot.round(4))
         boot.to_csv(os.path.join(out_dir, "pca_bootstrap_variance.csv"))
+
+    # ── Graph-theoretic insight extraction ──
+    print("\nFund-regime communities (Louvain on projected cosine-similarity graph):")
+    comm_df, proj_G, consistency = mapper.fund_projection_communities()
+    print(comm_df)
+    print("\nStyle consistency (# communities each fund spans across regimes; 1 = stable):")
+    print(consistency.to_string())
+    comm_df.to_csv(os.path.join(out_dir, "fund_communities.csv"))
+    consistency.to_csv(os.path.join(out_dir, "fund_style_consistency.csv"))
+
+    print("\nPairwise spectral distance between regime layers:")
+    spec_df, regime_layers, spectra = mapper.regime_spectral_distance(df_agg, FF_FACTORS)
+    print(spec_df.to_string(index=False))
+    spec_df.to_csv(os.path.join(out_dir, "regime_spectral_distance.csv"), index=False)
+
+    for r, layer in regime_layers.items():
+        path = os.path.join(out_dir, f"regime_layer_R{r}.graphml")
+        nx.write_graphml(layer, path)
+    print(f"Regime layers exported: {len(regime_layers)} .graphml files in {out_dir}/")
 
     network = mapper.build_bipartite_network(edge_threshold=dcfg["edge_threshold"])
 
