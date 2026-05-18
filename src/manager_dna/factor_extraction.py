@@ -35,7 +35,8 @@ class ManagerialFactorExtractor:
         print(f"Fetching data for {self.fund_ticker} vs {self.benchmark_ticker}...")
 
         tickers = [self.fund_ticker, self.benchmark_ticker]
-        prices = yf.download(tickers, start=self.start_date)["Adj Close"]
+        raw = yf.download(tickers, start=self.start_date)
+        prices = raw["Adj Close"] if "Adj Close" in raw.columns.get_level_values(0) else raw["Close"]
         returns = np.log(prices / prices.shift(1)).dropna()
         returns["Active_Return"] = returns[self.fund_ticker] - returns[self.benchmark_ticker]
 
