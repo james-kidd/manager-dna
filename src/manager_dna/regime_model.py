@@ -37,7 +37,8 @@ class MarketRegimeModel:
         print("Fetching market and macro data...")
 
         tickers = ["SPY", "^VIX"]
-        df_yf = yf.download(tickers, start=self.start_date, end=self.end_date)["Adj Close"]
+        raw = yf.download(tickers, start=self.start_date, end=self.end_date)
+        df_yf = raw["Adj Close"] if "Adj Close" in raw.columns.get_level_values(0) else raw["Close"]
         df_yf["SPY_Return"] = np.log(df_yf["SPY"] / df_yf["SPY"].shift(1))
         df_yf["VIX_Level"] = df_yf["^VIX"]
 
