@@ -131,6 +131,38 @@ Mean, std, p05, p50, p95 of each PC's explained variance ratio over 1,000 bootst
 - **Wide bands** = small-sample noise dominates. With n=15 expect ±5–10pp on PC1.
 - Report PC1 as "65% ± [p05, p95]" rather than as a point estimate.
 
+### `style_drift_classification.csv`
+Per-fund classification combining the three drift signals into one label.
+Columns: `total_drift, communities_spanned, universe_spectral_max, drift_class`.
+- **drift_class = "Drifting"** — fund has high cross-regime drift *and* its peer
+  group changes (communities_spanned > 1). Strong active-management signal.
+- **drift_class = "Rotational"** — one of the two conditions holds. Modest signal.
+- **drift_class = "Stable"** — neither. Likely a passive / rules-based fund.
+
+This is the **single headline label** to attach to each fund. The other CSVs
+provide the supporting evidence.
+
+### `managerial_dna_network.html`
+Interactive Plotly version of the bipartite network plot. Open in any browser.
+- **Hover a fund node** → tooltip with that fund-regime's PCA loadings on each PC.
+- **Hover a Super-Style node** → tooltip with the PC's loadings on each FF factor.
+- **Hover an edge** → tooltip with weight and sign.
+- Edge color and dashing match the static PNG (blue solid = long, red dashed = short).
+
+Enabled by `dna_mapper.interactive_html: true` in `config.yaml`. Requires
+`pip install plotly` (or `pip install -e ".[interactive]"`).
+
+### Hull-adjusted `{TICKER}_factor_loadings.csv`
+When `hull_adjustment` is configured for a fund, its factor loadings CSV is
+saved post-adjustment. The DataFrame's `attrs` dict records the multiplier
+applied (`hull_multiplier`). A multiplier of 1.00 means no adjustment; 1.15
+means options exposure increased effective equity beta by 15%; 0.85 means
+options reduced it by 15% (typical for covered-call strategies).
+
+Populate the `hull_adjustment` block in `config.yaml` from SEC Form N-PORT
+disclosures or fund company holdings reports. See `hull_adjustment.py` for
+the option position schema.
+
 ### `regime_labels.csv` and `{TICKER}_factor_loadings.csv`
 Raw per-day outputs. Useful for custom analyses but not the headline artifacts.
 

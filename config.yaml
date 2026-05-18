@@ -22,15 +22,49 @@ dna_mapper:
   n_components: 2             # number of Super-Style PCs to extract
   edge_threshold: 0.5         # minimum |loading| to draw an edge
   bootstrap_iter: 1000        # 0 to skip bootstrap diagnostic
+  drift_quantile: 0.66        # fund w/ Total_Drift above this quantile flagged high
+  interactive_html: true      # write Plotly HTML alongside the static PNG
+
+# ── Hull delta-equivalent adjustment ──
+# Per-fund options exposure for delta-adjusting FF beta loadings.
+# Populate from SEC N-PORT (quarterly, ~60-day lag) or fund company disclosures.
+# Each entry: ticker -> {nav: float, positions: [OptionPosition kwargs ...]}
+# Leave empty to skip Hull adjustment. Example schema below (commented).
+hull_adjustment: {}
+# hull_adjustment:
+#   JEPI:
+#     nav: 35000000000
+#     positions:
+#       - underlying: "SPX"
+#         option_type: "call"
+#         is_long: false        # short calls (covered-call strategy)
+#         contracts: 50000
+#         multiplier: 100
+#         spot: 5500.0
+#         strike: 5550.0
+#         days_to_expiry: 30
+#         iv: 0.14
 
 # ── Multi-fund comparison (optional) ──
 # List additional tickers to run Stage 1 on each, then compare in Stage 3
 fund_universe:
-  - "ARKK"
+  # Discretionary growth / thematic
+  - "ARKK"          # Cathie Wood disruptive innovation
+  - "ARKW"          # Cathie Wood next-gen internet
+  # Large-cap growth
   - "QQQ"
+  - "VUG"
+  - "IWF"
+  # Value / dividend
   - "SCHD"
   - "VTV"
-  - "MTUM"
+  - "IWD"
+  - "DGRO"
+  - "NOBL"          # dividend aristocrats
+  # Factor / quality
+  - "MTUM"          # momentum
+  - "QUAL"          # quality
+  - "USMV"          # low volatility
 
 # ── Output ──
 output:

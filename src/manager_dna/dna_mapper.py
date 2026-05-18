@@ -211,6 +211,131 @@ class ManagerialDNAMapper:
 
         return B
 
+    def detect_style_drift(self, communities_df, drift_df, spectral_df,
+                           drift_quantile=0.66, spectral_threshold=None):
+        """Classify each fund as Stable / Rotational / Drifting by combining:
+          - communities_spanned (Louvain across regimes; >1 = peer group changes)
+          - within-fund Total_Drift (std of mean betas across regimes)
+          - regime spectral distance (universe-level context, used for thresholding)
+
+        Args:
+            communities_df: output of fund_projection_communities (3-tuple's [0])
+            drift_df:       within_fund_drift DataFrame, indexed by fund, with Total_Drift col
+            spectral_df:    regime_spectral_distance DataFrame
+            drift_quantile: a fund whose Total_Drift exceeds this quantile of the universe
+                            is considered high-drift (default top third)
+            spectral_threshold: if provided, only treat drift as meaningful when the
+                                MAX pairwise regime spectral distance exceeds this.
+
+        Returns a DataFrame indexed by fund with columns:
+            total_drift, communities_spanned, drift_class
+        where drift_class in {"Stable", "Rotational", "Drifting"}.
+        """
+        consistency = communities_df.groupby("fund")["community"].nunique()
+        drift_total = drift_df["Total_Drift"] if "Total_Drift" in drift_df.columns else drift_df.sum(axis=1)
+        threshold = drift_total.quantile(drift_quantile)
+        universe_drift = spectral_df["spectral_distance"].max() if len(spectral_df) else 0.0
+
+        out = pd.DataFrame({
+            "total_drift": drift_total,
+            "communities_spanned": consistency.reindex(drift_total.index).fillna(1).astype(int),
+            "universe_spectral_max": universe_drift,
+        })
+
+        gate = (spectral_threshold is None) or (universe_drift >= spectral_threshold)
+
+        def classify(row):
+            high_drift = row["total_drift"] >= threshold
+            shifts_community = row["communities_spanned"] > 1
+            if gate and shifts_community and high_drift:
+                return "Drifting"
+            if gate and (shifts_community or high_drift):
+                return "Rotational"
+            return "Stable"
+
+        out["drift_class"] = out.apply(classify, axis=1)
+        return out.sort_values(["drift_class", "total_drift"], ascending=[True, False])
+
+    def visualize_network_interactive(self, B, save_path="output/managerial_dna_network.html"):
+        """Interactive Plotly version of the bipartite network.
+
+        Hover a node to see its PCA loadings; hover an edge to see weight and sign.
+        Plotly is imported lazily so it remains an optional dependency.
+        """
+        try:
+            import plotly.graph_objects as go
+        except ImportError as exc:
+            raise ImportError(
+                "Plotly is required for visualize_network_interactive. "
+                "Install with: pip install plotly"
+            ) from exc
+
+        top_nodes = {n for n, d in B.nodes(data=True) if d["bipartite"] == 0}
+        pos = nx.bipartite_layout(B, top_nodes)
+
+        edge_traces = []
+        for u, v, d in B.edges(data=True):
+            x0, y0 = pos[u]
+            x1, y1 = pos[v]
+            color = "rgba(31, 119, 180, 0.7)" if d["sign"] > 0 else "rgba(214, 39, 40, 0.7)"
+            edge_traces.append(go.Scatter(
+                x=[x0, x1, None], y=[y0, y1, None],
+                line=dict(width=max(1.0, d["weight"] * 3), color=color,
+                          dash="solid" if d["sign"] > 0 else "dash"),
+                hoverinfo="text",
+                text=f"{u} ↔ {v}<br>weight = {d['weight']:.3f}<br>sign = {'+' if d['sign']>0 else '−'}",
+                mode="lines",
+                showlegend=False,
+            ))
+
+        fund_x, fund_y, fund_text = [], [], []
+        for node in top_nodes:
+            x, y = pos[node]
+            fund_x.append(x); fund_y.append(y)
+            tip = f"<b>{node}</b>"
+            if self.fund_loadings is not None and node in self.fund_loadings.index:
+                for col in self.fund_loadings.columns:
+                    tip += f"<br>{col}: {self.fund_loadings.loc[node, col]:+.3f}"
+            fund_text.append(tip)
+
+        style_x, style_y, style_text = [], [], []
+        for node in set(B) - top_nodes:
+            x, y = pos[node]
+            style_x.append(x); style_y.append(y)
+            tip = f"<b>{node}</b>"
+            if self.super_styles is not None and node in self.super_styles.index:
+                for col in self.super_styles.columns:
+                    tip += f"<br>{col}: {self.super_styles.loc[node, col]:+.3f}"
+            style_text.append(tip)
+
+        fund_trace = go.Scatter(
+            x=fund_x, y=fund_y, mode="markers+text", name="Funds",
+            text=list(top_nodes), textposition="middle left",
+            hovertext=fund_text, hoverinfo="text",
+            marker=dict(size=24, color="lightblue", line=dict(width=2, color="steelblue")),
+        )
+        style_trace = go.Scatter(
+            x=style_x, y=style_y, mode="markers+text", name="Super-Styles",
+            text=[n for n in set(B) - top_nodes], textposition="middle right",
+            hovertext=style_text, hoverinfo="text",
+            marker=dict(size=30, color="lightgreen", symbol="square",
+                        line=dict(width=2, color="seagreen")),
+        )
+
+        fig = go.Figure(data=edge_traces + [fund_trace, style_trace])
+        fig.update_layout(
+            title="Managerial DNA — Interactive Bipartite Conviction Network",
+            showlegend=True,
+            hovermode="closest",
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            margin=dict(l=20, r=20, t=60, b=20),
+            plot_bgcolor="white",
+        )
+        fig.write_html(save_path, include_plotlyjs="cdn")
+        print(f"Interactive network saved: {save_path}")
+        return fig
+
     def visualize_network(self, B, save_path="output/managerial_dna_network.png"):
         plt.figure(figsize=(12, 8))
 
